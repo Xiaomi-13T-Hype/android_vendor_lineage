@@ -1024,10 +1024,10 @@ function build_kernel() {
 }
 
 function generate_host_overrides() {
-    export BUILD_USERNAME=android-build
+    export BUILD_USERNAME="Xiaomi-13T-Hype"
     HEX=$(openssl rand -hex 8)
     ALPHA=$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 4)
-    export BUILD_HOSTNAME="r-${HEX}-${ALPHA}"
+    export BUILD_HOSTNAME="ASUS-Tuf-Gaming-F15-2021"
     echo "BUILD_USERNAME=$BUILD_USERNAME"
     echo "BUILD_HOSTNAME=$BUILD_HOSTNAME"
 }
