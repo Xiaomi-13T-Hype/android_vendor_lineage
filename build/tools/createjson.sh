@@ -199,10 +199,10 @@ if [ -d "./vendor/OTA/.git" ]; then
     GIT_CRED_OPT=()
     if [ -f "$HOME/.git-credentials" ]; then
         cp -f "$HOME/.git-credentials" /tmp/git-credentials 2>/dev/null && chmod 600 /tmp/git-credentials 2>/dev/null || true
-        GIT_CRED_OPT=(-c credential.helper="store --file /tmp/git-credentials")
+        GIT_CRED_OPT=(-c credential.helper= -c credential.helper="store --file /tmp/git-credentials")
     elif [ -f "/home/Ximi/.git-credentials" ]; then
         cp -f "/home/Ximi/.git-credentials" /tmp/git-credentials 2>/dev/null && chmod 600 /tmp/git-credentials 2>/dev/null || true
-        GIT_CRED_OPT=(-c credential.helper="store --file /tmp/git-credentials")
+        GIT_CRED_OPT=(-c credential.helper= -c credential.helper="store --file /tmp/git-credentials")
     fi
 
     PUSH_SUCCESS=0
