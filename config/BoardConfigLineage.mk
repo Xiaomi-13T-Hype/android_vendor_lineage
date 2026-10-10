@@ -11,3 +11,7 @@ ifeq ($(BOARD_USES_QCOM_HARDWARE),true)
 endif
 
 include vendor/lineage/config/BoardConfigSoong.mk
+
+# Allow network access in build sandbox for OTA metadata push and HF upload
+BUILD_BROKEN_USES_NETWORK := true
+BUILD_BROKEN_NINJA_USES_ENV_VARS += http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
