@@ -14,7 +14,7 @@ PRODUCT_OUT="$2"
 FILENAME="$3"
 
 # Detect build variant
-if [[ "$FILENAME" == *"vanilla"* ]]; then
+if [[ "${FILENAME,,}" == *"vanilla"* ]]; then
     BUILD_VARIANT="vanilla"
 else
     BUILD_VARIANT="gapps"
@@ -23,10 +23,8 @@ fi
 # Set OTA json location
 if [[ "$BUILD_VARIANT" == "vanilla" ]]; then
     existingOTAjson="./vendor/OTA/builds/vanilla/${DEVICE}.json"
-    DOWNLOAD_URL="https://sourceforge.net/projects/ghosuto/files/${DEVICE}/vanilla/${FILENAME}/download"
 else
     existingOTAjson="./vendor/OTA/builds/${DEVICE}.json"
-    DOWNLOAD_URL="https://sourceforge.net/projects/ghosuto/files/${DEVICE}/${FILENAME}/download"
 fi
 
 output="${PRODUCT_OUT}/${DEVICE}.json"
@@ -64,17 +62,23 @@ if [ -f "$existingOTAjson" ]; then
     KERNEL=$(extract_field "kernel")
 fi
 
-# Extract version from filename
-VERSION=$(echo "$FILENAME" | cut -d'-' -f5 | sed 's/v//')
-V_MAX=$(echo "$VERSION" | cut -d'.' -f1)
-V_MIN=$(echo "$VERSION" | cut -d'.' -f2)
-VERSION="$V_MAX.$V_MIN"
-
 # Build information
 BUILDPROP="$PRODUCT_OUT/system/build.prop"
 TIMESTAMP=$(grep "ro.system.build.date.utc" "$BUILDPROP" | cut -d'=' -f2)
 OS_PATCH_LEVEL=$(grep -m1 "^ro.build.version.security_patch=" "$BUILDPROP" | cut -d'=' -f2)
 OS_SDK_LEVEL=$(grep -m1 "^ro.build.version.sdk=" "$BUILDPROP" | cut -d'=' -f2)
+
+# Extract version robustly from build.prop or filename
+VERSION=$(grep -h -m1 "^ro.lunaris.build.version=" "$PRODUCT_OUT/product/etc/build.prop" "$BUILDPROP" 2>/dev/null | cut -d'=' -f2)
+if [ -z "$VERSION" ]; then
+    RAW_VER=$(echo "$FILENAME" | cut -d'-' -f5 | sed 's/v//')
+    V_MAX=$(echo "$RAW_VER" | cut -d'.' -f1)
+    V_MIN=$(echo "$RAW_VER" | cut -d'.' -f2)
+    VERSION="$V_MAX.$V_MIN"
+fi
+
+HF_REPO="MotoTaper/Lunaris-AOSP-Private-OTA"
+DOWNLOAD_URL="https://huggingface.co/datasets/${HF_REPO}/resolve/main/${FILENAME}"
 
 MD5=$(md5sum "$PRODUCT_OUT/$FILENAME" | cut -d' ' -f1)
 SHA256=$(sha256sum "$PRODUCT_OUT/$FILENAME" | cut -d' ' -f1)
@@ -85,8 +89,8 @@ cat <<EOF >"$output"
 {
   "response": [
     {
-      "maintainer": "${MAINTAINER:-}",
-      "oem": "${OEM:-}",
+      "maintainer": "${MAINTAINER:-Xiaomi-13T-Hype | モトテーパー}",
+      "oem": "${OEM:-Xiaomi}",
       "device": "${DEVICE_NAME:-$DEVICE}",
       "filename": "$FILENAME",
       "download": "$DOWNLOAD_URL",
@@ -97,22 +101,94 @@ cat <<EOF >"$output"
       "version": "$VERSION",
       "os_patch_level": "${OS_PATCH_LEVEL:-}",
       "os_sdk_level": ${OS_SDK_LEVEL:-0},
-      "buildtype": "${BUILDTYPE:-}",
-      "forum": "${FORUM:-}",
+      "buildtype": "${BUILDTYPE:-Official}",
+      "forum": "${FORUM:-https://github.com/Xiaomi-13T-Hype/android_device_xiaomi_vayu/issues}",
       "gapps": "${GAPPS:-}",
       "firmware": "${FIRMWARE:-}",
       "modem": "${MODEM:-}",
       "bootloader": "${BOOTLOADER:-}",
       "recovery": "${RECOVERY:-}",
-      "paypal": "${PAYPAL:-}",
-      "telegram": "${TELEGRAM:-}",
-      "dt": "${DT:-}",
-      "common-dt": "${COMMON_DT:-}",
-      "kernel": "${KERNEL:-}"
+      "paypal": "${PAYPAL:-https://www.tbank-online.com/rm/r_bfmwbAMMTz.WSlHwfDIiR/aJY3777024/}",
+      "telegram": "${TELEGRAM:-https://t.me/+aErhUEdrIkY4YWY6}",
+      "dt": "${DT:-https://github.com/Xiaomi-13T-Hype/android_device_xiaomi_vayu}",
+      "common-dt": "${COMMON_DT:-https://github.com/Xiaomi-13T-Hype/android_device_xiaomi_sm8150-common}",
+      "kernel": "${KERNEL:-https://github.com/Xiaomi-13T-Hype/android_kernel_xiaomi_sm8150}"
     }
   ]
 }
 EOF
+
+# Upload ROM ZIP to Hugging Face CDN
+HF_BIN=""
+for candidate in \
+    "/home/Ximi/.local/share/pipx/venvs/huggingface-hub/bin/hf" \
+    "/home/Ximi/.local/bin/hf" \
+    "/usr/local/bin/hf"; do
+    if [ -x "$candidate" ]; then
+        HF_BIN="$candidate"
+        break
+    fi
+done
+
+# Autodetect and configure proxy for external network operations
+if [ -z "$HTTPS_PROXY" ] && [ -z "$https_proxy" ]; then
+    if (echo > /dev/tcp/127.0.0.1/10809) >/dev/null 2>&1; then
+        export HTTP_PROXY="http://127.0.0.1:10809"
+        export HTTPS_PROXY="http://127.0.0.1:10809"
+        export ALL_PROXY="http://127.0.0.1:10809"
+    elif (echo > /dev/tcp/127.0.0.1/10808) >/dev/null 2>&1; then
+        export HTTP_PROXY="http://127.0.0.1:10809"
+        export HTTPS_PROXY="http://127.0.0.1:10809"
+        export ALL_PROXY="socks5://127.0.0.1:10808"
+    fi
+fi
+
+if [ -n "$HF_BIN" ] && [ -f "$PRODUCT_OUT/$FILENAME" ]; then
+    echo "========================================================================"
+    echo "Uploading $FILENAME to Hugging Face CDN ($HF_REPO)..."
+    echo "========================================================================"
+    MAX_RETRIES=3
+    UPLOAD_SUCCESS=0
+    for attempt in $(seq 1 $MAX_RETRIES); do
+        echo "[*] Hugging Face upload attempt $attempt of $MAX_RETRIES..."
+        if "$HF_BIN" upload --repo-type dataset "$HF_REPO" "$PRODUCT_OUT/$FILENAME" "$FILENAME"; then
+            echo "[+] Upload to Hugging Face successful!"
+            UPLOAD_SUCCESS=1
+            break
+        fi
+        echo "[-] Attempt $attempt failed. Retrying in 4 seconds..."
+        sleep 4
+    done
+    if [ $UPLOAD_SUCCESS -ne 1 ]; then
+        echo "[-] Warning: Failed to upload ROM ZIP to Hugging Face after $MAX_RETRIES attempts." >&2
+    fi
+fi
+
+# Automatically update and push to vendor/OTA repository
+if [ -d "./vendor/OTA/.git" ]; then
+    echo "Synchronizing and pushing OTA updates to GitHub..."
+    cp "$output" "$existingOTAjson"
+    git -C "./vendor/OTA" add builds/ changelogs/
+    git -C "./vendor/OTA" commit -m "OTA: Update ${DEVICE} (${FILENAME})" || true
+    
+    PUSH_SUCCESS=0
+    for proxy_opt in "http://127.0.0.1:10809" "socks5h://127.0.0.1:10808" ""; do
+        CMD=(git -C "./vendor/OTA" -c http.proxy="$proxy_opt" push origin main)
+        if "${CMD[@]}"; then
+            PUSH_SUCCESS=1
+            break
+        fi
+        sleep 2
+    done
+    if [ $PUSH_SUCCESS -eq 1 ]; then
+        echo "OTA metadata successfully pushed to GitHub!"
+    else
+        echo "Warning: Failed to push to vendor/OTA" >&2
+    fi
+elif [ -d "$(dirname "$existingOTAjson")" ]; then
+    cp "$output" "$existingOTAjson"
+    echo "Synchronized JSON to $existingOTAjson"
+fi
 
 if [ ! -f "$existingOTAjson" ]; then
     echo "There is no official support for this device yet"
