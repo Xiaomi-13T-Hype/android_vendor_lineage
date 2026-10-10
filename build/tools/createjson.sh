@@ -130,17 +130,36 @@ for candidate in \
     fi
 done
 
-# Autodetect and configure proxy for external network operations
-if [ -z "$HTTPS_PROXY" ] && [ -z "$https_proxy" ]; then
-    if (echo > /dev/tcp/127.0.0.1/10809) >/dev/null 2>&1; then
-        export HTTP_PROXY="http://127.0.0.1:10809"
-        export HTTPS_PROXY="http://127.0.0.1:10809"
-        export ALL_PROXY="http://127.0.0.1:10809"
-    elif (echo > /dev/tcp/127.0.0.1/10808) >/dev/null 2>&1; then
-        export HTTP_PROXY="http://127.0.0.1:10809"
-        export HTTPS_PROXY="http://127.0.0.1:10809"
-        export ALL_PROXY="socks5://127.0.0.1:10808"
-    fi
+# Configure writable cache and storage for Hugging Face & git in nsjail sandbox
+# In Android build sandbox, / (including /home/Ximi) is mounted read-only; only /tmp and $PRODUCT_OUT are writable
+export HF_HOME="${PRODUCT_OUT}/.hf_home"
+export XDG_CACHE_HOME="${PRODUCT_OUT}/.cache"
+export TMPDIR="/tmp"
+mkdir -p "$HF_HOME" "$XDG_CACHE_HOME"
+
+# Extract HF token from host cache if not present in environment
+if [ -z "$HF_TOKEN" ]; then
+    for token_candidate in \
+        "$HOME/.cache/huggingface/token" \
+        "/home/Ximi/.cache/huggingface/token"; do
+        if [ -f "$token_candidate" ]; then
+            export HF_TOKEN="$(cat "$token_candidate" 2>/dev/null)"
+            break
+        fi
+    done
+fi
+if [ -n "$HF_TOKEN" ]; then
+    echo "$HF_TOKEN" > "$HF_HOME/token"
+fi
+
+# Autodetect proxy for fallback
+DETECTED_HTTP_PROXY=""
+if [ -n "$HTTPS_PROXY" ]; then
+    DETECTED_HTTP_PROXY="$HTTPS_PROXY"
+elif [ -n "$https_proxy" ]; then
+    DETECTED_HTTP_PROXY="$https_proxy"
+elif (echo > /dev/tcp/127.0.0.1/10809) >/dev/null 2>&1; then
+    DETECTED_HTTP_PROXY="http://127.0.0.1:10809"
 fi
 
 if [ -n "$HF_BIN" ] && [ -f "$PRODUCT_OUT/$FILENAME" ]; then
@@ -151,7 +170,12 @@ if [ -n "$HF_BIN" ] && [ -f "$PRODUCT_OUT/$FILENAME" ]; then
     UPLOAD_SUCCESS=0
     for attempt in $(seq 1 $MAX_RETRIES); do
         echo "[*] Hugging Face upload attempt $attempt of $MAX_RETRIES..."
-        if "$HF_BIN" upload --repo-type dataset "$HF_REPO" "$PRODUCT_OUT/$FILENAME" "$FILENAME"; then
+        if [ $attempt -eq 1 ] || [ -z "$DETECTED_HTTP_PROXY" ]; then
+            UPLOAD_CMD=(env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY "$HF_BIN" upload --repo-type dataset "$HF_REPO" "$PRODUCT_OUT/$FILENAME" "$FILENAME")
+        else
+            UPLOAD_CMD=(env HTTP_PROXY="$DETECTED_HTTP_PROXY" HTTPS_PROXY="$DETECTED_HTTP_PROXY" "$HF_BIN" upload --repo-type dataset "$HF_REPO" "$PRODUCT_OUT/$FILENAME" "$FILENAME")
+        fi
+        if "${UPLOAD_CMD[@]}"; then
             echo "[+] Upload to Hugging Face successful!"
             UPLOAD_SUCCESS=1
             break
@@ -171,9 +195,19 @@ if [ -d "./vendor/OTA/.git" ]; then
     git -C "./vendor/OTA" add builds/ changelogs/
     git -C "./vendor/OTA" commit -m "OTA: Update ${DEVICE} (${FILENAME})" || true
     
+    # Prepare writable git credentials copy for nsjail sandbox
+    GIT_CRED_OPT=()
+    if [ -f "$HOME/.git-credentials" ]; then
+        cp -f "$HOME/.git-credentials" /tmp/git-credentials 2>/dev/null && chmod 600 /tmp/git-credentials 2>/dev/null || true
+        GIT_CRED_OPT=(-c credential.helper="store --file /tmp/git-credentials")
+    elif [ -f "/home/Ximi/.git-credentials" ]; then
+        cp -f "/home/Ximi/.git-credentials" /tmp/git-credentials 2>/dev/null && chmod 600 /tmp/git-credentials 2>/dev/null || true
+        GIT_CRED_OPT=(-c credential.helper="store --file /tmp/git-credentials")
+    fi
+
     PUSH_SUCCESS=0
     for proxy_opt in "http://127.0.0.1:10809" "socks5h://127.0.0.1:10808" ""; do
-        CMD=(git -C "./vendor/OTA" -c http.proxy="$proxy_opt" push origin main)
+        CMD=(git -C "./vendor/OTA" "${GIT_CRED_OPT[@]}" -c http.proxy="$proxy_opt" push origin main)
         if "${CMD[@]}"; then
             PUSH_SUCCESS=1
             break
