@@ -1,3 +1,4 @@
 proprietary/*
 prebuilt/archive
 prebuilt/generated/*
+build/tools/

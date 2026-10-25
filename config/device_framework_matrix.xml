@@ -2154,6 +2154,18 @@
             <instance>default</instance>
         </interface>
     </hal>
+    <hal format="aidl" optional="true">
+        <name>vendor.lineage.health</name>
+        <version>1-2</version>
+        <interface>
+            <name>IChargingControl</name>
+            <instance>default</instance>
+        </interface>
+        <interface>
+            <name>IFastCharge</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
     <sepolicy>
         <kernel-sepolicy-version>30</kernel-sepolicy-version>
         <sepolicy-version>29.0</sepolicy-version>
